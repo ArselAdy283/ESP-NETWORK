@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1783074358940,
+      "tag": "0000_yellow_skullbuster",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1783841781576,
+      "tag": "0001_dapper_doctor_spectrum",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1783869518598,
+      "tag": "0002_aberrant_mad_thinker",
+      "breakpoints": true
+    }
+  ]
+}
