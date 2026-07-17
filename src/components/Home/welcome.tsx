@@ -1,11 +1,16 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { motion, type Variants } from "motion/react";
 import { toast } from "sonner";
 import { FiCopy } from "react-icons/fi";
+import { useLenis } from "lenis/react";
+
+const MotionLink = motion.create(Link);
 
 const Welcome = () => {
+    const lenis = useLenis();
 
     const itemVariants: Variants = {
         hidden: { opacity: 0, x: -50 },
@@ -48,19 +53,23 @@ const Welcome = () => {
                     Bangun markasmu, kumpulkan sumber daya, Jelajahi dunia, <br /> dan ciptakan kisahmu sendiri.
                 </p>
                 <div className="mt-12 flex gap-5">
-                    <motion.button
+                    <MotionLink
+                        href="#"
                         whileHover={{ scale: 1.05 }}
                         whileTap={{ scale: 0.95 }}
                         className="text-black bg-yellow-500 rounded-lg px-6 py-3 font-bold cursor-pointer transition-colors hover:bg-yellow-400"
                     >
-                        Let's play
-                    </motion.button>
+                        Mulai Bermain
+                    </MotionLink>
                     <motion.button
                         whileHover={{ scale: 1.05 }}
                         whileTap={{ scale: 0.95 }}
                         className="text-white border-yellow-500 border-2 rounded-lg px-6 py-3 font-bold cursor-pointer transition-colors hover:bg-yellow-500/10"
+                        onClick={() => {
+                            lenis?.scrollTo("#server-info", { offset: -120 });
+                        }}
                     >
-                        Show More
+                        Lihat Lainnya
                     </motion.button>
                 </div>
             </motion.div>
@@ -73,7 +82,7 @@ const Welcome = () => {
                         ease: "easeInOut",
                     }}
                 >
-                    <Image src="/assets/esp-logo.png" alt="ESP Network Logo" width={500} height={500} className="drop-shadow-2xl" />
+                    <Image src="/assets/esp-logo.png" alt="ESP Network Logo" width={500} height={500} className="drop-shadow-2xl" priority={true} />
                 </motion.div>
             </motion.div>
         </motion.div>

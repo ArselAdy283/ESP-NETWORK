@@ -1,4 +1,4 @@
-import AppBar from "@/components/Navbar/navbar"
+import AppBar from "@/components/Navbar"
 import Login from "@/components/Auth/login"
 import ProfileComponents from "@/components/Profile"
 import { auth } from "@/lib/auth"

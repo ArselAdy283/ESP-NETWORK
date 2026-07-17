@@ -15,6 +15,7 @@ interface GameAccount {
     textureId: string | null;
     isVerified: boolean;
     isLoading: boolean;
+    isFetchingSkin: boolean;
 }
 
 interface GameAccountsState {
@@ -22,11 +23,11 @@ interface GameAccountsState {
     bedrock: GameAccount;
 }
 
-const defaultAccountState: GameAccount = { username: "", uuid: null, textureId: null, isVerified: false, isLoading: false };
+const defaultAccountState: GameAccount = { username: "", uuid: null, textureId: null, isVerified: false, isLoading: false, isFetchingSkin: false };
 
 const ProfileComponents = () => {
     const router = useRouter()
-    const { data: session } = authClient.useSession()
+    const { data: session, isPending, refetch } = authClient.useSession()
 
     const [isEditing, setIsEditing] = useState(false)
     const [accountName, setAccountName] = useState("Loading...")
@@ -51,34 +52,39 @@ const ProfileComponents = () => {
         }
 
         const fetchLatestSkin = async (username: string, type: GameAccountType) => {
-            if (!username) return;
+            if (!username) {
+                setGameAccounts(prev => ({ ...prev, [type]: { ...prev[type], isFetchingSkin: false } }));
+                return;
+            }
             try {
                 const apiHeaders = {
                     "Authorization": `Bearer ${process.env.NEXT_PUBLIC_ARSELADYCORE_BEARER}`,
                     "Content-Type": "application/json"
                 };
-                const playerRes = await fetch(`http://localhost:8000/api/v1/player/${username}`, { headers: apiHeaders });
+                const playerRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/v1/player/${username}`, { headers: apiHeaders });
                 if (!playerRes.ok) return;
                 const playerData = await playerRes.json();
                 const uuid = playerData.uuid || playerData.data?.uuid;
                 if (!uuid) return;
 
-                const skinRes = await fetch(`http://localhost:8000/api/v1/skin/${uuid}`, { headers: apiHeaders });
+                const skinRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/v1/skin/${uuid}`, { headers: apiHeaders });
                 if (!skinRes.ok) return;
                 const skinData = await skinRes.json();
                 const textureId = skinData.textureId || skinData.data?.textureId;
 
                 if (textureId) {
-                    setGameAccounts(prev => {
-                        const newState = {
-                            ...prev,
-                            [type]: { ...prev[type], textureId: textureId, isVerified: true, uuid: uuid }
-                        };
-                        return newState;
-                    });
+                    setGameAccounts(prev => ({
+                        ...prev,
+                        [type]: { ...prev[type], textureId: textureId, isVerified: true, uuid: uuid }
+                    }));
                 }
             } catch (e) {
                 console.error(`Background fetch failed for ${username}`, e);
+            } finally {
+                setGameAccounts(prev => ({
+                    ...prev,
+                    [type]: { ...prev[type], isFetchingSkin: false }
+                }));
             }
         };
 
@@ -93,8 +99,8 @@ const ProfileComponents = () => {
             const bedrockTex = session.user.bedrockTextureId || null;
 
             const newState = {
-                java: { ...defaultAccountState, username: javaUser, textureId: javaTex, isVerified: !!javaTex },
-                bedrock: { ...defaultAccountState, username: bedrockUser, textureId: bedrockTex, isVerified: !!bedrockTex }
+                java: { ...defaultAccountState, username: javaUser, textureId: javaTex, isVerified: !!javaTex, isFetchingSkin: !!javaUser },
+                bedrock: { ...defaultAccountState, username: bedrockUser, textureId: bedrockTex, isVerified: !!bedrockTex, isFetchingSkin: !!bedrockUser }
             };
 
             setGameAccounts(newState);
@@ -135,15 +141,16 @@ const ProfileComponents = () => {
                 "Content-Type": "application/json"
             };
 
-            console.log(`[VERIFY] Memanggil API untuk ${type} username: "${acc.username}"`);
-            const playerRes = await fetch(`http://localhost:8000/api/v1/player/${acc.username}`, {
+            const fetchUrl = `${process.env.NEXT_PUBLIC_API_URL}/v1/player/${acc.username}`;
+            console.log(`[VERIFY] Memanggil API untuk ${type} username: "${acc.username}" dengan URL: ${fetchUrl}`);
+            const playerRes = await fetch(fetchUrl, {
                 headers: apiHeaders
             });
 
             if (!playerRes.ok) {
                 const errorText = await playerRes.text().catch(() => "Tidak ada response body");
-                console.error(`[VERIFY PLAYER ERROR] Status: ${playerRes.status} ${playerRes.statusText}`, errorText);
-                throw new Error(`Gagal (Player API: ${playerRes.status})`);
+                console.error(`[VERIFY PLAYER ERROR] Status: ${playerRes.status} ${playerRes.statusText} for URL: ${fetchUrl}`, errorText);
+                throw new Error(`Gagal (Player API: ${playerRes.status}) - ${acc.username}`);
             }
 
             const playerData = await playerRes.json();
@@ -151,8 +158,9 @@ const ProfileComponents = () => {
 
             if (!uuid) throw new Error("UUID tidak ditemukan di response Player API");
 
-            console.log(`[VERIFY] UUID didapatkan: ${uuid}, mengambil skin...`);
-            const skinRes = await fetch(`http://localhost:8000/api/v1/skin/${uuid}`, {
+            const skinFetchUrl = `${process.env.NEXT_PUBLIC_API_URL}/v1/skin/${uuid}`;
+            console.log(`[VERIFY] UUID didapatkan: ${uuid}, mengambil skin dari URL: ${skinFetchUrl}`);
+            const skinRes = await fetch(skinFetchUrl, {
                 headers: apiHeaders
             });
 
@@ -218,7 +226,7 @@ const ProfileComponents = () => {
             toast.error("Harap verifikasi (Cek) Username Java Anda terlebih dahulu!");
             return;
         }
-        
+
         if (editGameAccounts.bedrock.username && !editGameAccounts.bedrock.isVerified) {
             toast.error("Harap verifikasi (Cek) Username Bedrock Anda terlebih dahulu!");
             return;
@@ -252,8 +260,10 @@ const ProfileComponents = () => {
         }
 
         toast.success("Profil berhasil disimpan!");
-        // Refresh router untuk update session
-        router.refresh();
+        // Update session di background tanpa mereload halaman
+        if (refetch) {
+            await refetch();
+        }
     }
 
     const cancelEdits = () => {
@@ -272,7 +282,7 @@ const ProfileComponents = () => {
     return (
         <div className="min-h-screen bg-zinc-950 text-white pb-20 pt-16 mt-5">
             {/* Banner/Cover Image Section */}
-            <div className="relative w-full h-48 md:h-64 lg:h-72 bg-linear-to-br from-zinc-900 via-zinc-800 to-yellow-900/40 shadow-[0_4px_30px_rgba(0,0,0,0.5)] overflow-hidden group border-b border-zinc-800/50">
+            <div className="relative w-full h-48 md:h-64 lg:h-72 bg-linear-to-br from-zinc-900 via-zinc-800 to-yellow-900/40 shadow-[0_4px_30px_rgba(0,0,0,0.5)] overflow-hidden group border-b border-gray-800">
                 <div className="absolute inset-0 bg-black/20 group-hover:bg-black/10 transition-all duration-500"></div>
                 <div className="absolute inset-0 bg-[url('/assets/background-profile.png')] bg-cover bg-center bg-no-repeat opacity-50"></div>
 
@@ -280,7 +290,7 @@ const ProfileComponents = () => {
                 <div className="absolute top-6 right-6 flex gap-2">
                     <button
                         onClick={handleSignOut}
-                        className="bg-red-600/90 hover:bg-red-500/90 text-zinc-300 hover:text-white p-3 rounded-xl backdrop-blur-md transition-all shadow-lg border border-zinc-700/50 hover:border-red-500/50"
+                        className="bg-red-600/90 hover:bg-red-500/90 text-zinc-300 hover:text-white p-3 rounded-xl backdrop-blur-md transition-all shadow-lg border border-gray-800 hover:border-red-500/50"
                         title="Keluar / Logout"
                     >
                         <FiLogOut size={20} />
@@ -290,24 +300,28 @@ const ProfileComponents = () => {
 
             {/* Profile Info Section (YouTube Style) */}
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative -mt-16 md:-mt-24 mb-6 z-10">
-                <div className="flex flex-col md:flex-row items-center md:items-end gap-6 bg-zinc-900/70 backdrop-blur-xl p-6 md:p-8 rounded-3xl shadow-2xl border border-zinc-800/60">
+                <div className="flex flex-col md:flex-row items-center md:items-end gap-6 bg-zinc-900/70 backdrop-blur-xl p-6 md:p-8 rounded-3xl shadow-2xl border border-gray-800">
 
                     {/* Avatar (mc-heads) */}
                     <div className="relative group">
-                        <div className="w-32 h-32 md:w-40 md:h-40 bg-zinc-800 rounded-2xl overflow-hidden shadow-[0_0_15px_rgba(0,0,0,0.5)] border-4 border-zinc-900 shrink-0 flex items-center justify-center relative">
-                            <img
-                                src={displayAccounts[currentViewType].textureId
-                                    ? `https://mc-heads.net/avatar/${displayAccounts[currentViewType].textureId}/160`
-                                    : `https://mc-heads.net/avatar/${displayAccounts[currentViewType].username || 'Steve'}/160`}
-                                alt={`${displayAccounts[currentViewType].username} Avatar`}
-                                className="w-full h-full object-cover"
-                                style={{ imageRendering: 'pixelated' }}
-                                onError={(e) => { e.currentTarget.src = "https://mc-heads.net/avatar/Steve/160" }}
-                            />
+                        <div className="w-32 h-32 md:w-40 md:h-40 bg-zinc-800 rounded-2xl overflow-hidden shadow-[0_0_15px_rgba(0,0,0,0.5)] border-4 border-gray-800 shrink-0 flex items-center justify-center relative">
+                            {isPending || displayAccounts[currentViewType]?.isFetchingSkin ? (
+                                <FiLoader className="animate-spin text-yellow-500" size={32} />
+                            ) : (
+                                <img
+                                    src={displayAccounts[currentViewType].textureId
+                                        ? `https://mc-heads.net/avatar/${displayAccounts[currentViewType].textureId}/160`
+                                        : `https://mc-heads.net/avatar/${displayAccounts[currentViewType].username || 'Steve'}/160`}
+                                    alt={`${displayAccounts[currentViewType].username} Avatar`}
+                                    className="w-full h-full object-cover"
+                                    style={{ imageRendering: 'pixelated' }}
+                                    onError={(e) => { e.currentTarget.src = "https://mc-heads.net/avatar/Steve/160" }}
+                                />
+                            )}
                         </div>
                         {/* Toggle Account Type */}
                         {(displayAccounts.java.username && displayAccounts.bedrock.username) && (
-                            <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 flex bg-zinc-900 border border-zinc-700 rounded-lg overflow-hidden shadow-lg">
+                            <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 flex bg-zinc-900 border border-gray-800 rounded-lg overflow-hidden shadow-lg">
                                 <button
                                     onClick={() => setActiveAccountType('java')}
                                     className={`px-3 py-1 text-xs font-bold transition-colors ${activeAccountType === 'java' ? 'bg-yellow-500 text-zinc-900' : 'text-zinc-400 hover:text-white'}`}
@@ -327,14 +341,14 @@ const ProfileComponents = () => {
                     {/* User Details */}
                     <div className="flex-1 text-center md:text-left mb-2 w-full mt-4 md:mt-0">
                         {isEditing ? (
-                            <div className="flex flex-col gap-4 max-w-sm mx-auto md:mx-0 bg-zinc-950/50 p-4 rounded-xl border border-zinc-800/50">
+                            <div className="flex flex-col gap-4 max-w-sm mx-auto md:mx-0 bg-zinc-950/50 p-4 rounded-xl border border-gray-800">
                                 <div>
                                     <label className="text-xs font-semibold text-zinc-400 mb-1.5 block uppercase tracking-wider">Nama Akun</label>
                                     <input
                                         type="text"
                                         value={editAccountName}
                                         onChange={(e) => setEditAccountName(e.target.value)}
-                                        className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-yellow-500 focus:ring-1 focus:ring-yellow-500 transition-all"
+                                        className="w-full bg-zinc-900 border border-gray-800 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-yellow-500 focus:ring-1 focus:ring-yellow-500 transition-all"
                                         placeholder="Nama Akun Anda"
                                     />
                                 </div>
@@ -350,13 +364,13 @@ const ProfileComponents = () => {
                                             type="text"
                                             value={editGameAccounts.java.username}
                                             onChange={(e) => handleUsernameChange('java', e.target.value)}
-                                            className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-yellow-500 focus:ring-1 focus:ring-yellow-500 transition-all min-w-0"
+                                            className="flex-1 bg-zinc-900 border border-gray-800 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-yellow-500 focus:ring-1 focus:ring-yellow-500 transition-all min-w-0"
                                             placeholder="Username Java"
                                         />
                                         <button
                                             onClick={() => verifyAccount('java')}
                                             disabled={editGameAccounts.java.isLoading || !editGameAccounts.java.username}
-                                            className="bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 px-3 rounded-lg border border-zinc-700 transition-colors flex items-center justify-center shrink-0"
+                                            className="bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 px-3 rounded-lg border border-gray-800 transition-colors flex items-center justify-center shrink-0"
                                             title="Verifikasi Akun"
                                         >
                                             {editGameAccounts.java.isLoading ? <FiLoader className="animate-spin text-yellow-500" /> : 'Cek'}
@@ -375,13 +389,13 @@ const ProfileComponents = () => {
                                             type="text"
                                             value={editGameAccounts.bedrock.username}
                                             onChange={(e) => handleUsernameChange('bedrock', e.target.value)}
-                                            className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-yellow-500 focus:ring-1 focus:ring-yellow-500 transition-all min-w-0"
+                                            className="flex-1 bg-zinc-900 border border-gray-800 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-yellow-500 focus:ring-1 focus:ring-yellow-500 transition-all min-w-0"
                                             placeholder=".UsernameBedrock"
                                         />
                                         <button
                                             onClick={() => verifyAccount('bedrock')}
                                             disabled={editGameAccounts.bedrock.isLoading || !editGameAccounts.bedrock.username}
-                                            className="bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 px-3 rounded-lg border border-zinc-700 transition-colors flex items-center justify-center shrink-0"
+                                            className="bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 px-3 rounded-lg border border-gray-800 transition-colors flex items-center justify-center shrink-0"
                                             title="Verifikasi Akun"
                                         >
                                             {editGameAccounts.bedrock.isLoading ? <FiLoader className="animate-spin text-yellow-500" /> : 'Cek'}
@@ -405,7 +419,7 @@ const ProfileComponents = () => {
                                 </h1>
                                 <div className="mt-3 flex flex-wrap items-center gap-2">
                                     {gameAccounts.java.username && (
-                                        <div className="inline-flex items-center gap-2 bg-zinc-950/50 border border-zinc-800 rounded-full px-4 py-1.5 shadow-inner">
+                                        <div className="inline-flex items-center gap-2 bg-zinc-950/50 border border-gray-800 rounded-full px-4 py-1.5 shadow-inner">
                                             <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
                                             <span className="text-sm text-zinc-300">
                                                 Java: <span className="text-yellow-500 font-semibold tracking-wide">{gameAccounts.java.username}</span>
@@ -413,7 +427,7 @@ const ProfileComponents = () => {
                                         </div>
                                     )}
                                     {gameAccounts.bedrock.username && (
-                                        <div className="inline-flex items-center gap-2 bg-zinc-950/50 border border-zinc-800 rounded-full px-4 py-1.5 shadow-inner">
+                                        <div className="inline-flex items-center gap-2 bg-zinc-950/50 border border-gray-800 rounded-full px-4 py-1.5 shadow-inner">
                                             <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
                                             <span className="text-sm text-zinc-300">
                                                 Bedrock: <span className="text-yellow-500 font-semibold tracking-wide">{gameAccounts.bedrock.username}</span>
@@ -433,7 +447,7 @@ const ProfileComponents = () => {
                         <div className="flex gap-3 w-full md:w-auto mt-4 md:mt-0">
                             <button
                                 onClick={startEditing}
-                                className="flex-1 md:flex-none bg-zinc-800/80 hover:bg-yellow-500 hover:text-zinc-950 text-white font-semibold py-2.5 px-6 rounded-xl flex items-center justify-center gap-2 transition-all border border-zinc-700/50 hover:border-yellow-500"
+                                className="flex-1 md:flex-none bg-zinc-800/80 hover:bg-yellow-500 hover:text-zinc-950 text-white font-semibold py-2.5 px-6 rounded-xl flex items-center justify-center gap-2 transition-all border border-gray-800 hover:border-yellow-500"
                             >
                                 <FiEdit2 size={16} /> Edit Profile
                             </button>
@@ -444,7 +458,7 @@ const ProfileComponents = () => {
 
             {/* Tabs Navigation */}
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-2">
-                <div className="flex border-b border-zinc-800/60 overflow-x-auto no-scrollbar">
+                <div className="flex border-b border-gray-800 overflow-x-auto no-scrollbar">
                     {[
                         { id: 'overview', label: 'Overview' },
                         { id: 'stats', label: 'Statistik' },
@@ -474,7 +488,7 @@ const ProfileComponents = () => {
 
                     {/* Left Column: 3D Skin Viewer (vzge.me) */}
                     <div className="order-2 lg:order-1 lg:col-span-4">
-                        <div className="bg-zinc-900/40 backdrop-blur-md rounded-3xl p-6 border border-zinc-800/50 flex flex-col items-center shadow-lg relative overflow-hidden group">
+                        <div className="bg-zinc-900/40 backdrop-blur-md rounded-3xl p-6 border border-gray-800 flex flex-col items-center shadow-lg relative overflow-hidden group">
                             <div className="absolute inset-0 bg-linear-to-b from-yellow-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
 
                             <div className="w-full flex justify-between items-center mb-6 z-10">
@@ -485,29 +499,33 @@ const ProfileComponents = () => {
 
                             <div className="w-full max-w-60 h-112.5 relative z-10 flex items-center justify-center">
                                 {/* vzge.me full skin render */}
-                                <img
-                                    src={displayAccounts[currentViewType].textureId
-                                        ? `https://vzge.me/full/512/${displayAccounts[currentViewType].textureId}`
-                                        : `https://vzge.me/full/512/${displayAccounts[currentViewType].username || 'Steve'}`}
-                                    alt={`${displayAccounts[currentViewType].username} full skin`}
-                                    className="w-full h-full object-contain filter drop-shadow-[0_10px_20px_rgba(0,0,0,0.6)] hover:scale-105 transition-transform duration-500"
-                                    style={{ imageRendering: 'pixelated' }}
-                                    onError={(e) => { e.currentTarget.src = "https://vzge.me/full/512/Steve" }}
-                                />
+                                {isPending || displayAccounts[currentViewType]?.isFetchingSkin ? (
+                                    <FiLoader className="animate-spin text-yellow-500" size={48} />
+                                ) : (
+                                    <img
+                                        src={displayAccounts[currentViewType].textureId
+                                            ? `https://vzge.me/full/512/${displayAccounts[currentViewType].textureId}`
+                                            : `https://vzge.me/full/512/${displayAccounts[currentViewType].username || 'Steve'}`}
+                                        alt={`${displayAccounts[currentViewType].username} full skin`}
+                                        className="w-full h-full object-contain filter drop-shadow-[0_10px_20px_rgba(0,0,0,0.6)] hover:scale-105 transition-transform duration-500"
+                                        style={{ imageRendering: 'pixelated' }}
+                                        onError={(e) => { e.currentTarget.src = "https://vzge.me/full/512/Steve" }}
+                                    />
+                                )}
                             </div>
                         </div>
                     </div>
 
                     {/* Right Column: Main Content */}
                     <div className="order-1 lg:order-2 lg:col-span-8">
-                        <div className="bg-zinc-900/40 backdrop-blur-md rounded-3xl p-6 md:p-8 border border-zinc-800/50 shadow-lg min-h-125 flex flex-col">
+                        <div className="bg-zinc-900/40 backdrop-blur-md rounded-3xl p-6 md:p-8 border border-gray-800 shadow-lg min-h-125 flex flex-col">
                             <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-3">
                                 <FiList className="text-yellow-500" />
                                 <span className="capitalize">{activeTab}</span> Konten
                             </h3>
 
                             {/* Placeholder for actual content */}
-                            <div className="flex-1 border-2 border-dashed border-zinc-800/80 rounded-2xl p-10 flex flex-col items-center justify-center text-zinc-500 bg-zinc-950/20">
+                            <div className="flex-1 border-2 border-dashed border-gray-800 rounded-2xl p-10 flex flex-col items-center justify-center text-zinc-500 bg-zinc-950/20">
                                 <div className="w-16 h-16 bg-zinc-800/50 rounded-full flex items-center justify-center mb-4">
                                     <FiGrid size={24} className="text-zinc-600" />
                                 </div>
